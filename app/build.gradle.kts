@@ -1,6 +1,7 @@
 plugins {
     application
     checkstyle
+    id("com.gradleup.shadow") version "9.3.2"
     id("org.sonarqube") version "7.1.0.6387"
 }
 
@@ -26,6 +27,9 @@ repositories {
 }
 
 dependencies {
+    implementation("io.javalin:javalin:6.7.0")
+    implementation("org.slf4j:slf4j-simple:2.0.17")
+
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
 }
@@ -36,6 +40,10 @@ tasks.test {
 
 application {
     mainClass = "hexlet.code.App"
+}
+
+tasks.named<Jar>("shadowJar") {
+    archiveClassifier.set("all")
 }
 
 java {

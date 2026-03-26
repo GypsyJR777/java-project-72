@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: java-project-72
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: JAVA_VERSION
+        value: "21"
