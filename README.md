@@ -24,4 +24,4 @@ java -jar build/libs/app-1.0-SNAPSHOT-all.jar
 
 В проект добавлен файл `render.yaml` для деплоя на Render.
 
-Ссылка на приложение на Render после деплоя: `https://java-project-72.onrender.com`
+Ссылка на приложение на Render после деплоя: `https://java-project-72-kz8x.onrender.com/`
