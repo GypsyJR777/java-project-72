@@ -1,6 +1,10 @@
 package hexlet.code;
 
+import com.zaxxer.hikari.HikariDataSource;
+import hexlet.code.database.DatabaseConfig;
+import hexlet.code.database.DatabaseInitializer;
 import io.javalin.Javalin;
+import java.sql.SQLException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,15 +16,28 @@ public final class App {
     }
 
     public static Javalin getApp() {
-        var app = Javalin.create(config -> {
+        HikariDataSource dataSource = initDataSource();
+        Javalin app = Javalin.create(config -> {
             config.bundledPlugins.enableDevLogging();
         });
+        app.events(events -> events.serverStopped(dataSource::close));
         app.get("/", ctx -> ctx.result("Hello World"));
         return app;
     }
 
+    private static HikariDataSource initDataSource() {
+        HikariDataSource dataSource = DatabaseConfig.getDataSource();
+        try {
+            DatabaseInitializer.run(dataSource);
+            return dataSource;
+        } catch (SQLException e) {
+            dataSource.close();
+            throw new IllegalStateException("Failed to initialize database", e);
+        }
+    }
+
     private static int resolvePort() {
-        var port = System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT));
+        String port = System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT));
         try {
             return Integer.parseInt(port);
         } catch (NumberFormatException e) {
@@ -30,8 +47,8 @@ public final class App {
     }
 
     public static void main(String[] args) {
-        var port = resolvePort();
-        var app = getApp();
+        int port = resolvePort();
+        Javalin app = getApp();
         app.start(port);
         LOGGER.info("Application started on port {}", port);
     }
