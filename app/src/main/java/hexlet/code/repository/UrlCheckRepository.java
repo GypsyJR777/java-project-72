@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import javax.sql.DataSource;
 
-public class UrlCheckRepository extends BaseRepository {
+public final class UrlCheckRepository extends BaseRepository {
     public UrlCheckRepository(DataSource dataSource) {
         super(dataSource);
     }

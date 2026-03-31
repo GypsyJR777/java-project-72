@@ -11,7 +11,7 @@ public abstract class BaseRepository {
         this.dataSource = dataSource;
     }
 
-    protected Connection getConnection() throws SQLException {
+    protected final Connection getConnection() throws SQLException {
         return dataSource.getConnection();
     }
 }
