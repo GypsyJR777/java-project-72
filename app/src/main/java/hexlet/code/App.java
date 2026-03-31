@@ -7,6 +7,8 @@ import gg.jte.resolve.ResourceCodeResolver;
 import hexlet.code.database.DatabaseConfig;
 import hexlet.code.database.DatabaseInitializer;
 import hexlet.code.model.Url;
+import hexlet.code.model.UrlCheck;
+import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
@@ -23,6 +25,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import kong.unirest.HttpResponse;
+import kong.unirest.Unirest;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +43,7 @@ public final class App {
     public static Javalin getApp() {
         HikariDataSource dataSource = initDataSource();
         UrlRepository urlRepository = new UrlRepository(dataSource);
+        UrlCheckRepository urlCheckRepository = new UrlCheckRepository(dataSource);
         Javalin app = Javalin.create(config -> {
             config.bundledPlugins.enableDevLogging();
             config.fileRenderer(new JavalinJte(createTemplateEngine()));
@@ -43,8 +51,9 @@ public final class App {
         app.events(events -> events.serverStopped(dataSource::close));
         app.get("/", ctx -> renderHomePage(ctx, "", null, null));
         app.post("/urls", ctx -> handleCreateUrl(ctx, urlRepository));
-        app.get("/urls", ctx -> renderUrlsPage(ctx, urlRepository));
-        app.get("/urls/{id}", ctx -> renderUrlPage(ctx, urlRepository));
+        app.get("/urls", ctx -> renderUrlsPage(ctx, urlRepository, urlCheckRepository));
+        app.get("/urls/{id}", ctx -> renderUrlPage(ctx, urlRepository, urlCheckRepository));
+        app.post("/urls/{id}/checks", ctx -> handleCreateCheck(ctx, urlRepository, urlCheckRepository));
         return app;
     }
 
@@ -94,14 +103,24 @@ public final class App {
         }
     }
 
-    private static void renderUrlsPage(Context ctx, UrlRepository urlRepository) throws SQLException {
+    private static void renderUrlsPage(
+        Context ctx,
+        UrlRepository urlRepository,
+        UrlCheckRepository urlCheckRepository
+    ) throws SQLException {
         List<Url> urls = urlRepository.findAll();
+        Map<Long, UrlCheck> latestChecks = urlCheckRepository.findLatestChecks();
         Map<String, Object> model = baseTemplateData(ctx, null, null);
         model.put("urls", urls);
+        model.put("latestChecks", latestChecks);
         ctx.render("urls/index.jte", model);
     }
 
-    private static void renderUrlPage(Context ctx, UrlRepository urlRepository) throws SQLException {
+    private static void renderUrlPage(
+        Context ctx,
+        UrlRepository urlRepository,
+        UrlCheckRepository urlCheckRepository
+    ) throws SQLException {
         try {
             long id = Long.parseLong(ctx.pathParam("id"));
             Optional<Url> url = urlRepository.find(id);
@@ -113,10 +132,42 @@ public final class App {
 
             Map<String, Object> model = baseTemplateData(ctx, null, null);
             model.put("url", url.get());
+            model.put("checks", urlCheckRepository.findByUrlId(id));
             ctx.render("urls/show.jte", model);
         } catch (NumberFormatException e) {
             ctx.status(404);
             ctx.result("Page not found");
+        }
+    }
+
+    private static void handleCreateCheck(
+        Context ctx,
+        UrlRepository urlRepository,
+        UrlCheckRepository urlCheckRepository
+    ) throws SQLException {
+        try {
+            long id = Long.parseLong(ctx.pathParam("id"));
+            Optional<Url> url = urlRepository.find(id);
+            if (url.isEmpty()) {
+                ctx.status(404);
+                ctx.result("Page not found");
+                return;
+            }
+
+            UrlCheck urlCheck = buildUrlCheck(url.get());
+            if (urlCheck.statusCode() >= 400) {
+                setFlash(ctx, "danger", "Произошла ошибка при проверке");
+            } else {
+                urlCheckRepository.save(urlCheck);
+                setFlash(ctx, "success", "Страница успешно проверена");
+            }
+            ctx.redirect("/urls/" + id);
+        } catch (NumberFormatException e) {
+            ctx.status(404);
+            ctx.result("Page not found");
+        } catch (RuntimeException e) {
+            setFlash(ctx, "danger", "Произошла ошибка при проверке");
+            ctx.redirect("/urls/" + ctx.pathParam("id"));
         }
     }
 
@@ -141,6 +192,30 @@ public final class App {
         }
     }
 
+    private static UrlCheck buildUrlCheck(Url url) {
+        HttpResponse<String> response = Unirest.get(url.name()).asString();
+        String body = Optional.ofNullable(response.getBody()).orElse("");
+        Document document = Jsoup.parse(body);
+        return new UrlCheck(
+            response.getStatus(),
+            document.title(),
+            extractFirstText(document, "h1"),
+            extractMetaContent(document, "description"),
+            url.id(),
+            Timestamp.from(Instant.now())
+        );
+    }
+
+    private static String extractFirstText(Document document, String selector) {
+        Element element = document.selectFirst(selector);
+        return element == null ? "" : element.text();
+    }
+
+    private static String extractMetaContent(Document document, String metaName) {
+        Element element = document.selectFirst("meta[name=" + metaName + "]");
+        return element == null ? "" : element.attr("content");
+    }
+
     private static Map<String, Object> baseTemplateData(Context ctx, String flashType, String flashMessage) {
         Map<String, Object> model = new HashMap<>();
         FlashMessage resolvedFlash = flashMessage == null
@@ -163,7 +238,10 @@ public final class App {
     }
 
     private static int resolvePort() {
-        String port = System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT));
+        String port = System.getProperty("PORT");
+        if (port == null || port.isBlank()) {
+            port = System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT));
+        }
         try {
             return Integer.parseInt(port);
         } catch (NumberFormatException e) {

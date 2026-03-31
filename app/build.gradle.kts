@@ -31,13 +31,16 @@ repositories {
 
 dependencies {
     implementation("com.zaxxer:HikariCP:7.0.2")
+    implementation("com.konghq:unirest-java:3.14.5")
     implementation("com.h2database:h2:2.3.232")
     implementation("gg.jte:jte:3.2.3")
     implementation("io.javalin:javalin:6.7.0")
     implementation("io.javalin:javalin-rendering:6.7.0")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("org.postgresql:postgresql:42.7.8")
     implementation("org.slf4j:slf4j-simple:2.0.17")
 
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

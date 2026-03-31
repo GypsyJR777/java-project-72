@@ -18,7 +18,12 @@ public final class DatabaseInitializer {
             Connection connection = dataSource.getConnection();
             Statement statement = connection.createStatement()
         ) {
-            statement.execute(loadSchema());
+            for (String sql : loadSchema().split(";")) {
+                String normalizedSql = sql.trim();
+                if (!normalizedSql.isEmpty()) {
+                    statement.execute(normalizedSql);
+                }
+            }
         }
     }
 

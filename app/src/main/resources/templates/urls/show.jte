@@ -1,8 +1,11 @@
 @import hexlet.code.model.Url
+@import hexlet.code.model.UrlCheck
+@import java.util.List
 
 @param String flashType
 @param String flashMessage
 @param Url url
+@param List<UrlCheck> checks
 
 @template.layout.main(
     title = "Сайт",
@@ -43,6 +46,16 @@
                         </tr>
                     </thead>
                     <tbody>
+                        @for(UrlCheck check : checks)
+                            <tr>
+                                <td>${check.id()}</td>
+                                <td>${check.statusCode()}</td>
+                                <td>${check.h1ForDisplay()}</td>
+                                <td>${check.titleForDisplay()}</td>
+                                <td>${check.descriptionForDisplay()}</td>
+                                <td>${check.createdAt().toLocalDateTime().toLocalDate().toString()}</td>
+                            </tr>
+                        @endfor
                     </tbody>
                 </table>
             </div>

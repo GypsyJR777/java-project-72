@@ -1,9 +1,12 @@
 @import hexlet.code.model.Url
+@import hexlet.code.model.UrlCheck
 @import java.util.List
+@import java.util.Map
 
 @param String flashType
 @param String flashMessage
 @param List<Url> urls
+@param Map<Long, UrlCheck> latestChecks
 
 @template.layout.main(
     title = "Сайты",
@@ -27,8 +30,16 @@
                             <tr>
                                 <td>${url.id()}</td>
                                 <td><a href="/urls/${url.id()}">${url.name()}</a></td>
-                                <td>${url.createdAt().toLocalDateTime().toLocalDate().toString()}</td>
-                                <td></td>
+                                <td>
+                                    ${latestChecks.get(url.id()) == null
+                                        ? ""
+                                        : latestChecks.get(url.id()).createdAt().toLocalDateTime().toLocalDate().toString()}
+                                </td>
+                                <td>
+                                    ${latestChecks.get(url.id()) == null
+                                        ? ""
+                                        : latestChecks.get(url.id()).statusCode().toString()}
+                                </td>
                             </tr>
                         @endfor
                     </tbody>

@@ -3,6 +3,8 @@ package hexlet.code;
 import com.zaxxer.hikari.HikariDataSource;
 import hexlet.code.database.DatabaseConfig;
 import hexlet.code.model.Url;
+import hexlet.code.model.UrlCheck;
+import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
 import io.javalin.Javalin;
 import java.io.IOException;
@@ -27,17 +29,33 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class AppTest {
     private static final String JDBC_PROPERTY = "JDBC_DATABASE_URL";
+    private static MockWebServer mockWebServer;
 
     private Javalin app;
     private HttpClient client;
     private String baseUrl;
+
+    @BeforeAll
+    static void startMockServer() throws IOException {
+        mockWebServer = new MockWebServer();
+        mockWebServer.start();
+    }
+
+    @AfterAll
+    static void stopMockServer() throws IOException {
+        mockWebServer.shutdown();
+    }
 
     @BeforeEach
     void setUp() {
@@ -139,6 +157,75 @@ class AppTest {
     }
 
     @Test
+    void checkUrlSavesCheckAndShowsItOnUrlPage() throws Exception {
+        enqueueHtmlResponse(200, longHtmlPage());
+
+        HttpResponse<String> createResponse = postForm("/urls", "url", mockWebServer.url("/page").toString());
+        Assertions.assertEquals(302, createResponse.statusCode());
+
+        HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
+
+        Assertions.assertEquals(302, checkResponse.statusCode());
+        Assertions.assertEquals("/urls/1", checkResponse.headers().firstValue("Location").orElseThrow());
+
+        List<UrlCheck> checks = findChecksByUrlId(1L);
+        Assertions.assertEquals(1, checks.size());
+        Assertions.assertEquals(200, checks.get(0).statusCode());
+
+        HttpResponse<String> showResponse = get("/urls/1");
+
+        Assertions.assertEquals(200, showResponse.statusCode());
+        Assertions.assertTrue(showResponse.body().contains("Страница успешно проверена"));
+        Assertions.assertTrue(showResponse.body().contains("data-test=\"checks\""));
+        Assertions.assertTrue(showResponse.body().contains("<td>1</td>"));
+        Assertions.assertTrue(showResponse.body().contains("<td>200</td>"));
+        Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long h1 ".repeat(25))));
+        Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long title ".repeat(20))));
+        Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long description ".repeat(20))));
+    }
+
+    @Test
+    void urlsPageShowsLatestCheckStatusAndDate() throws Exception {
+        enqueueHtmlResponse(
+            200,
+            """
+            <html>
+              <head><title>Home</title><meta name="description" content="desc"></head>
+              <body><h1>Hello</h1></body>
+            </html>
+            """
+        );
+
+        postForm("/urls", "url", mockWebServer.url("/latest").toString());
+        postEmpty("/urls/1/checks");
+
+        HttpResponse<String> response = get("/urls");
+
+        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertTrue(response.body().contains("data-test=\"urls\""));
+        Assertions.assertTrue(response.body().contains("<th>Код ответа</th>"));
+        Assertions.assertTrue(response.body().contains("200"));
+        Assertions.assertTrue(response.body().contains("http://localhost:" + mockWebServer.getPort()));
+    }
+
+    @Test
+    void failedCheckDoesNotCreateRecord() throws Exception {
+        enqueueHtmlResponse(500, "<html><body>Error</body></html>");
+        postForm("/urls", "url", mockWebServer.url("/error").toString());
+
+        HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
+
+        Assertions.assertEquals(302, checkResponse.statusCode());
+        Assertions.assertEquals("/urls/1", checkResponse.headers().firstValue("Location").orElseThrow());
+        Assertions.assertTrue(findChecksByUrlId(1L).isEmpty());
+
+        HttpResponse<String> showResponse = get("/urls/1");
+
+        Assertions.assertEquals(200, showResponse.statusCode());
+        Assertions.assertTrue(showResponse.body().contains("Произошла ошибка при проверке"));
+    }
+
+    @Test
     void missingUrlReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = get("/urls/999");
 
@@ -148,6 +235,20 @@ class AppTest {
     @Test
     void nonNumericUrlIdReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = get("/urls/not-a-number");
+
+        Assertions.assertEquals(404, response.statusCode());
+    }
+
+    @Test
+    void checkMissingUrlReturns404() throws IOException, InterruptedException {
+        HttpResponse<String> response = postEmpty("/urls/999/checks");
+
+        Assertions.assertEquals(404, response.statusCode());
+    }
+
+    @Test
+    void checkNonNumericUrlReturns404() throws IOException, InterruptedException {
+        HttpResponse<String> response = postEmpty("/urls/not-a-number/checks");
 
         Assertions.assertEquals(404, response.statusCode());
     }
@@ -192,6 +293,15 @@ class AppTest {
         );
 
         Assertions.assertEquals("URL is invalid", exception.getMessage());
+    }
+
+    @Test
+    void resolvePortUsesSystemProperty() throws ReflectiveOperationException {
+        System.setProperty("PORT", "9090");
+
+        int port = (int) invokePrivateStatic("resolvePort", new Class<?>[0]);
+
+        Assertions.assertEquals(9090, port);
     }
 
     @Test
@@ -252,6 +362,14 @@ class AppTest {
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    private HttpResponse<String> postEmpty(String path) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + path))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
     private String encodeFormField(String name, String value) {
         return URLEncoder.encode(name, StandardCharsets.UTF_8)
             + "="
@@ -277,6 +395,43 @@ class AppTest {
             UrlRepository repository = new UrlRepository(dataSource);
             return repository.findAll();
         }
+    }
+
+    private List<UrlCheck> findChecksByUrlId(long urlId) throws SQLException {
+        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
+            UrlCheckRepository repository = new UrlCheckRepository(dataSource);
+            return repository.findByUrlId(urlId);
+        }
+    }
+
+    private void enqueueHtmlResponse(int statusCode, String body) {
+        mockWebServer.enqueue(
+            new MockResponse()
+                .setResponseCode(statusCode)
+                .addHeader("Content-Type", "text/html")
+                .setBody(body)
+        );
+    }
+
+    private String longHtmlPage() {
+        String title = "Very long title ".repeat(20);
+        String h1 = "Very long h1 ".repeat(25);
+        String description = "Very long description ".repeat(20);
+        return """
+            <html>
+              <head>
+                <title>%s</title>
+                <meta name="description" content="%s">
+              </head>
+              <body>
+                <h1>%s</h1>
+              </body>
+            </html>
+            """.formatted(title, description, h1);
+    }
+
+    private String expectedTruncated(String text) {
+        return text.substring(0, 196) + "....";
     }
 
     private Object invokePrivateStatic(String methodName, Class<?>[] parameterTypes, Object... args)
