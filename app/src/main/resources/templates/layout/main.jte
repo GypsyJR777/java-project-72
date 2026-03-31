@@ -22,6 +22,9 @@
 <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
     <div class="container">
         <a class="navbar-brand" href="/">Анализатор страниц</a>
+        <div class="navbar-nav">
+            <a class="nav-link" href="/urls">Сайты</a>
+        </div>
     </div>
 </nav>
 <main class="container-lg">
