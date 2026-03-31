@@ -10,12 +10,11 @@ import hexlet.code.model.Url;
 import hexlet.code.model.UrlCheck;
 import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
+import hexlet.code.service.UrlCheckService;
+import hexlet.code.utils.UrlNormalizer;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.rendering.template.JavalinJte;
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.SQLException;
@@ -25,17 +24,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import kong.unirest.HttpResponse;
-import kong.unirest.Unirest;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public final class App {
     private static final Logger LOGGER = LoggerFactory.getLogger(App.class);
     private static final int DEFAULT_PORT = 7070;
+    private static final String NOT_FOUND_MESSAGE = "Page not found";
 
     private App() {
     }
@@ -44,6 +39,7 @@ public final class App {
         HikariDataSource dataSource = initDataSource();
         UrlRepository urlRepository = new UrlRepository(dataSource);
         UrlCheckRepository urlCheckRepository = new UrlCheckRepository(dataSource);
+        UrlCheckService urlCheckService = new UrlCheckService();
         Javalin app = Javalin.create(config -> {
             config.bundledPlugins.enableDevLogging();
             config.fileRenderer(new JavalinJte(createTemplateEngine()));
@@ -53,7 +49,7 @@ public final class App {
         app.post("/urls", ctx -> handleCreateUrl(ctx, urlRepository));
         app.get("/urls", ctx -> renderUrlsPage(ctx, urlRepository, urlCheckRepository));
         app.get("/urls/{id}", ctx -> renderUrlPage(ctx, urlRepository, urlCheckRepository));
-        app.post("/urls/{id}/checks", ctx -> handleCreateCheck(ctx, urlRepository, urlCheckRepository));
+        app.post("/urls/{id}/checks", ctx -> handleCreateCheck(ctx, urlRepository, urlCheckRepository, urlCheckService));
         return app;
     }
 
@@ -121,99 +117,45 @@ public final class App {
         UrlRepository urlRepository,
         UrlCheckRepository urlCheckRepository
     ) throws SQLException {
-        try {
-            long id = Long.parseLong(ctx.pathParam("id"));
-            Optional<Url> url = urlRepository.find(id);
-            if (url.isEmpty()) {
-                ctx.status(404);
-                ctx.result("Page not found");
-                return;
-            }
-
-            Map<String, Object> model = baseTemplateData(ctx, null, null);
-            model.put("url", url.get());
-            model.put("checks", urlCheckRepository.findByUrlId(id));
-            ctx.render("urls/show.jte", model);
-        } catch (NumberFormatException e) {
-            ctx.status(404);
-            ctx.result("Page not found");
+        Optional<Url> url = findRequestedUrl(ctx, urlRepository);
+        if (url.isEmpty()) {
+            return;
         }
+
+        Map<String, Object> model = baseTemplateData(ctx, null, null);
+        model.put("url", url.get());
+        model.put("checks", urlCheckRepository.findByUrlId(url.get().id()));
+        ctx.render("urls/show.jte", model);
     }
 
     private static void handleCreateCheck(
         Context ctx,
         UrlRepository urlRepository,
-        UrlCheckRepository urlCheckRepository
+        UrlCheckRepository urlCheckRepository,
+        UrlCheckService urlCheckService
     ) throws SQLException {
-        try {
-            long id = Long.parseLong(ctx.pathParam("id"));
-            Optional<Url> url = urlRepository.find(id);
-            if (url.isEmpty()) {
-                ctx.status(404);
-                ctx.result("Page not found");
-                return;
-            }
+        Optional<Url> url = findRequestedUrl(ctx, urlRepository);
+        if (url.isEmpty()) {
+            return;
+        }
 
-            UrlCheck urlCheck = buildUrlCheck(url.get());
+        try {
+            UrlCheck urlCheck = urlCheckService.perform(url.get());
             if (urlCheck.statusCode() >= 400) {
                 setFlash(ctx, "danger", "Произошла ошибка при проверке");
             } else {
                 urlCheckRepository.save(urlCheck);
                 setFlash(ctx, "success", "Страница успешно проверена");
             }
-            ctx.redirect("/urls/" + id);
-        } catch (NumberFormatException e) {
-            ctx.status(404);
-            ctx.result("Page not found");
+            ctx.redirect(urlPath(url.get().id()));
         } catch (RuntimeException e) {
             setFlash(ctx, "danger", "Произошла ошибка при проверке");
-            ctx.redirect("/urls/" + ctx.pathParam("id"));
+            ctx.redirect(urlPath(url.get().id()));
         }
     }
 
     private static String normalizeUrl(String rawUrl) {
-        if (rawUrl == null || rawUrl.isBlank()) {
-            throw new IllegalArgumentException("URL is blank");
-        }
-
-        try {
-            URI uri = new URI(rawUrl);
-            java.net.URL parsedUrl = uri.toURL();
-            String protocol = parsedUrl.getProtocol();
-            String authority = parsedUrl.getAuthority();
-
-            if (protocol == null || protocol.isBlank() || authority == null || authority.isBlank()) {
-                throw new IllegalArgumentException("URL is invalid");
-            }
-
-            return protocol + "://" + authority;
-        } catch (URISyntaxException | MalformedURLException e) {
-            throw new IllegalArgumentException("URL is invalid", e);
-        }
-    }
-
-    private static UrlCheck buildUrlCheck(Url url) {
-        HttpResponse<String> response = Unirest.get(url.name()).asString();
-        String body = Optional.ofNullable(response.getBody()).orElse("");
-        Document document = Jsoup.parse(body);
-        return new UrlCheck(
-            response.getStatus(),
-            document.title(),
-            extractFirstText(document, "h1"),
-            extractMetaContent(document, "description"),
-            url.id(),
-            Timestamp.from(Instant.now())
-        );
-    }
-
-    private static String extractFirstText(Document document, String selector) {
-        Element element = document.selectFirst(selector);
-        return element == null ? "" : element.text();
-    }
-
-    private static String extractMetaContent(Document document, String metaName) {
-        Element element = document.selectFirst("meta[name=" + metaName + "]");
-        return element == null ? "" : element.attr("content");
+        return UrlNormalizer.normalize(rawUrl);
     }
 
     private static Map<String, Object> baseTemplateData(Context ctx, String flashType, String flashMessage) {
@@ -235,6 +177,37 @@ public final class App {
         String flashType = ctx.consumeSessionAttribute("flashType");
         String flashMessage = ctx.consumeSessionAttribute("flashMessage");
         return new FlashMessage(flashType, flashMessage);
+    }
+
+    private static Optional<Url> findRequestedUrl(Context ctx, UrlRepository urlRepository) throws SQLException {
+        Long urlId = parseUrlId(ctx);
+        if (urlId == null) {
+            renderNotFound(ctx);
+            return Optional.empty();
+        }
+
+        Optional<Url> url = urlRepository.find(urlId);
+        if (url.isEmpty()) {
+            renderNotFound(ctx);
+        }
+        return url;
+    }
+
+    private static Long parseUrlId(Context ctx) {
+        try {
+            return Long.parseLong(ctx.pathParam("id"));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static void renderNotFound(Context ctx) {
+        ctx.status(404);
+        ctx.result(NOT_FOUND_MESSAGE);
+    }
+
+    private static String urlPath(long urlId) {
+        return "/urls/" + urlId;
     }
 
     private static int resolvePort() {
