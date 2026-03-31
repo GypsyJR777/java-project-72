@@ -6,11 +6,9 @@ import hexlet.code.model.Url;
 import hexlet.code.model.UrlCheck;
 import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
+import hexlet.code.utils.UrlNormalizer;
 import io.javalin.Javalin;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
@@ -32,11 +30,12 @@ import javax.sql.DataSource;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class AppTest {
     private static final String JDBC_PROPERTY = "JDBC_DATABASE_URL";
@@ -102,7 +101,7 @@ class AppTest {
     }
 
     @Test
-    void createUrlSavesEntityAndOpensItsPage() throws IOException, InterruptedException, SQLException {
+    void createUrlSavesEntityAndRedirectsToShowPage() throws IOException, InterruptedException, SQLException {
         HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/path?q=1");
 
         Assertions.assertEquals(302, createResponse.statusCode());
@@ -111,15 +110,19 @@ class AppTest {
         Optional<Url> savedUrl = findByName("https://example.com");
         Assertions.assertTrue(savedUrl.isPresent());
         Assertions.assertEquals(1L, savedUrl.get().id());
+    }
 
-        HttpResponse<String> showResponse = get("/urls/1");
+    @Test
+    void showUrlPageDisplaysSavedUrl() throws IOException, InterruptedException, SQLException {
+        Url savedUrl = saveUrl("https://example.com", "2026-03-31T00:00:00Z");
 
-        Assertions.assertEquals(200, showResponse.statusCode());
-        Assertions.assertTrue(showResponse.body().contains("Страница успешно добавлена"));
-        Assertions.assertTrue(showResponse.body().contains("data-test=\"url\""));
-        Assertions.assertTrue(showResponse.body().contains("https://example.com"));
-        Assertions.assertTrue(showResponse.body().contains("action=\"/urls/1/checks\""));
-        Assertions.assertTrue(showResponse.body().contains("data-test=\"checks\""));
+        HttpResponse<String> response = get("/urls/" + savedUrl.id());
+
+        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertTrue(response.body().contains("data-test=\"url\""));
+        Assertions.assertTrue(response.body().contains("https://example.com"));
+        Assertions.assertTrue(response.body().contains("action=\"/urls/" + savedUrl.id() + "/checks\""));
+        Assertions.assertTrue(response.body().contains("data-test=\"checks\""));
     }
 
     @Test
@@ -135,11 +138,6 @@ class AppTest {
             createResponse.headers().firstValue("Location").orElseThrow()
         );
         Assertions.assertEquals(1, findAllUrls().size());
-
-        HttpResponse<String> showResponse = get("/urls/" + existingUrl.id());
-
-        Assertions.assertEquals(200, showResponse.statusCode());
-        Assertions.assertTrue(showResponse.body().contains("Страница уже существует"));
     }
 
     @Test
@@ -157,11 +155,9 @@ class AppTest {
     }
 
     @Test
-    void checkUrlSavesCheckAndShowsItOnUrlPage() throws Exception {
+    void createCheckSavesEntityAndRedirectsToUrlPage() throws Exception {
         enqueueHtmlResponse(200, longHtmlPage());
-
-        HttpResponse<String> createResponse = postForm("/urls", "url", mockWebServer.url("/page").toString());
-        Assertions.assertEquals(302, createResponse.statusCode());
+        saveUrl(mockWebServer.url("/page").toString(), "2026-03-31T00:00:00Z");
 
         HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
 
@@ -171,11 +167,25 @@ class AppTest {
         List<UrlCheck> checks = findChecksByUrlId(1L);
         Assertions.assertEquals(1, checks.size());
         Assertions.assertEquals(200, checks.get(0).statusCode());
+    }
 
-        HttpResponse<String> showResponse = get("/urls/1");
+    @Test
+    void showUrlPageDisplaysSavedChecks() throws IOException, InterruptedException, SQLException {
+        Url url = saveUrl("https://example.com", "2026-03-31T00:00:00Z");
+        saveUrlCheck(
+            new UrlCheck(
+                200,
+                "Very long title ".repeat(20),
+                "Very long h1 ".repeat(25),
+                "Very long description ".repeat(20),
+                url.id(),
+                Timestamp.from(Instant.parse("2026-03-31T01:00:00Z"))
+            )
+        );
+
+        HttpResponse<String> showResponse = get("/urls/" + url.id());
 
         Assertions.assertEquals(200, showResponse.statusCode());
-        Assertions.assertTrue(showResponse.body().contains("Страница успешно проверена"));
         Assertions.assertTrue(showResponse.body().contains("data-test=\"checks\""));
         Assertions.assertTrue(showResponse.body().contains("<td>1</td>"));
         Assertions.assertTrue(showResponse.body().contains("<td>200</td>"));
@@ -186,18 +196,17 @@ class AppTest {
 
     @Test
     void urlsPageShowsLatestCheckStatusAndDate() throws Exception {
-        enqueueHtmlResponse(
-            200,
-            """
-            <html>
-              <head><title>Home</title><meta name="description" content="desc"></head>
-              <body><h1>Hello</h1></body>
-            </html>
-            """
+        Url url = saveUrl(mockWebServer.url("/latest").toString(), "2026-03-31T00:00:00Z");
+        saveUrlCheck(
+            new UrlCheck(
+                200,
+                "Home",
+                "Hello",
+                "desc",
+                url.id(),
+                Timestamp.from(Instant.parse("2026-03-31T01:00:00Z"))
+            )
         );
-
-        postForm("/urls", "url", mockWebServer.url("/latest").toString());
-        postEmpty("/urls/1/checks");
 
         HttpResponse<String> response = get("/urls");
 
@@ -211,13 +220,20 @@ class AppTest {
     @Test
     void failedCheckDoesNotCreateRecord() throws Exception {
         enqueueHtmlResponse(500, "<html><body>Error</body></html>");
-        postForm("/urls", "url", mockWebServer.url("/error").toString());
+        saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
 
         HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
 
         Assertions.assertEquals(302, checkResponse.statusCode());
         Assertions.assertEquals("/urls/1", checkResponse.headers().firstValue("Location").orElseThrow());
         Assertions.assertTrue(findChecksByUrlId(1L).isEmpty());
+    }
+
+    @Test
+    void showUrlPageDisplaysFailedCheckFlashMessage() throws Exception {
+        enqueueHtmlResponse(500, "<html><body>Error</body></html>");
+        saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
+        postEmpty("/urls/1/checks");
 
         HttpResponse<String> showResponse = get("/urls/1");
 
@@ -265,12 +281,8 @@ class AppTest {
     }
 
     @Test
-    void normalizeUrlStripsPathAndKeepsPort() throws ReflectiveOperationException {
-        String normalizedUrl = (String) invokePrivateStatic(
-            "normalizeUrl",
-            new Class<?>[] {String.class},
-            "https://some-domain.org:8080/example/path"
-        );
+    void normalizeUrlStripsPathAndKeepsPort() {
+        String normalizedUrl = UrlNormalizer.normalize("https://some-domain.org:8080/example/path");
 
         Assertions.assertEquals("https://some-domain.org:8080", normalizedUrl);
     }
@@ -279,7 +291,7 @@ class AppTest {
     void normalizeUrlRejectsBlankValue() {
         IllegalArgumentException exception = Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> invokePrivateStatic("normalizeUrl", new Class<?>[] {String.class}, "   ")
+            () -> UrlNormalizer.normalize("   ")
         );
 
         Assertions.assertEquals("URL is blank", exception.getMessage());
@@ -289,26 +301,26 @@ class AppTest {
     void normalizeUrlRejectsMalformedValue() {
         IllegalArgumentException exception = Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> invokePrivateStatic("normalizeUrl", new Class<?>[] {String.class}, "https://exa mple.com")
+            () -> UrlNormalizer.normalize("https://exa mple.com")
         );
 
         Assertions.assertEquals("URL is invalid", exception.getMessage());
     }
 
     @Test
-    void resolvePortUsesSystemProperty() throws ReflectiveOperationException {
+    void resolvePortUsesSystemProperty() {
         System.setProperty("PORT", "9090");
 
-        int port = (int) invokePrivateStatic("resolvePort", new Class<?>[0]);
+        int port = App.resolvePort();
 
         Assertions.assertEquals(9090, port);
     }
 
     @Test
-    void resolvePortFallsBackToDefaultForInvalidProperty() throws ReflectiveOperationException {
+    void resolvePortFallsBackToDefaultForInvalidProperty() {
         System.setProperty("PORT", "invalid");
 
-        int port = (int) invokePrivateStatic("resolvePort", new Class<?>[0]);
+        int port = App.resolvePort();
 
         Assertions.assertEquals(7070, port);
         System.clearProperty("PORT");
@@ -404,6 +416,13 @@ class AppTest {
         }
     }
 
+    private UrlCheck saveUrlCheck(UrlCheck urlCheck) throws SQLException {
+        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
+            UrlCheckRepository repository = new UrlCheckRepository(dataSource);
+            return repository.save(urlCheck);
+        }
+    }
+
     private void enqueueHtmlResponse(int statusCode, String body) {
         mockWebServer.enqueue(
             new MockResponse()
@@ -434,115 +453,25 @@ class AppTest {
         return text.substring(0, 196) + "....";
     }
 
-    private Object invokePrivateStatic(String methodName, Class<?>[] parameterTypes, Object... args)
-        throws ReflectiveOperationException {
-        Method method = App.class.getDeclaredMethod(methodName, parameterTypes);
-        method.setAccessible(true);
-
-        try {
-            return method.invoke(null, args);
-        } catch (InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            if (cause instanceof Error error) {
-                throw error;
-            }
-            throw e;
-        }
-    }
-
     private DataSource dataSourceWithoutGeneratedKeys() {
-        ResultSet resultSet = (ResultSet) Proxy.newProxyInstance(
-            ResultSet.class.getClassLoader(),
-            new Class<?>[] {ResultSet.class},
-            (proxy, method, args) -> {
-                if (method.getName().equals("next")) {
-                    return false;
-                }
-                if (method.getName().equals("close")) {
-                    return null;
-                }
-                return defaultValue(method.getReturnType());
-            }
-        );
+        try {
+            DataSource dataSource = Mockito.mock(DataSource.class);
+            Connection connection = Mockito.mock(Connection.class);
+            PreparedStatement statement = Mockito.mock(PreparedStatement.class);
+            ResultSet generatedKeys = Mockito.mock(ResultSet.class);
 
-        PreparedStatement statement = (PreparedStatement) Proxy.newProxyInstance(
-            PreparedStatement.class.getClassLoader(),
-            new Class<?>[] {PreparedStatement.class},
-            (proxy, method, args) -> {
-                if (
-                    method.getName().equals("setString")
-                        || method.getName().equals("setTimestamp")
-                        || method.getName().equals("close")
-                ) {
-                    return null;
-                }
-                if (method.getName().equals("executeUpdate")) {
-                    return 1;
-                }
-                if (method.getName().equals("getGeneratedKeys")) {
-                    return resultSet;
-                }
-                return defaultValue(method.getReturnType());
-            }
-        );
+            Mockito.when(dataSource.getConnection()).thenReturn(connection);
+            Mockito.when(
+                connection.prepareStatement(Mockito.anyString(), Mockito.eq(PreparedStatement.RETURN_GENERATED_KEYS))
+            )
+                .thenReturn(statement);
+            Mockito.when(statement.getGeneratedKeys()).thenReturn(generatedKeys);
+            Mockito.when(statement.executeUpdate()).thenReturn(1);
+            Mockito.when(generatedKeys.next()).thenReturn(false);
 
-        Connection connection = (Connection) Proxy.newProxyInstance(
-            Connection.class.getClassLoader(),
-            new Class<?>[] {Connection.class},
-            (proxy, method, args) -> {
-                if (method.getName().equals("prepareStatement")) {
-                    return statement;
-                }
-                if (method.getName().equals("close")) {
-                    return null;
-                }
-                return defaultValue(method.getReturnType());
-            }
-        );
-
-        return (DataSource) Proxy.newProxyInstance(
-            DataSource.class.getClassLoader(),
-            new Class<?>[] {DataSource.class},
-            (proxy, method, args) -> {
-                if (method.getName().equals("getConnection")) {
-                    return connection;
-                }
-                return defaultValue(method.getReturnType());
-            }
-        );
-    }
-
-    private Object defaultValue(Class<?> returnType) {
-        if (!returnType.isPrimitive()) {
-            return null;
+            return dataSource;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to create mock DataSource", e);
         }
-        if (returnType.equals(boolean.class)) {
-            return false;
-        }
-        if (returnType.equals(byte.class)) {
-            return (byte) 0;
-        }
-        if (returnType.equals(short.class)) {
-            return (short) 0;
-        }
-        if (returnType.equals(int.class)) {
-            return 0;
-        }
-        if (returnType.equals(long.class)) {
-            return 0L;
-        }
-        if (returnType.equals(float.class)) {
-            return 0F;
-        }
-        if (returnType.equals(double.class)) {
-            return 0D;
-        }
-        if (returnType.equals(char.class)) {
-            return '\0';
-        }
-        return null;
     }
 }

@@ -213,7 +213,7 @@ public final class App {
         return "/urls/" + urlId;
     }
 
-    private static int resolvePort() {
+    static int resolvePort() {
         String port = System.getProperty("PORT");
         if (port == null || port.isBlank()) {
             port = System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT));

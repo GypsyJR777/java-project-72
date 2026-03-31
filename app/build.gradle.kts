@@ -41,6 +41,7 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:2.0.17")
 
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.mockito:mockito-core:5.18.0")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
