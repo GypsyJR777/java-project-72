@@ -1,6 +1,9 @@
+import org.gradle.testing.jacoco.tasks.JacocoReport
+
 plugins {
     application
     checkstyle
+    jacoco
     id("com.gradleup.shadow") version "9.3.2"
     id("org.sonarqube") version "7.1.0.6387"
 }
@@ -37,10 +40,25 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+jacoco {
+    toolVersion = "0.8.13"
 }
 
 tasks.test {
     useJUnitPlatform()
+    finalizedBy(tasks.named("jacocoTestReport"))
+}
+
+tasks.named<JacocoReport>("jacocoTestReport") {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
 }
 
 application {
@@ -61,5 +79,6 @@ sonar {
     properties {
         property("sonar.projectKey", "GypsyJR777_java-project-72")
         property("sonar.organization", "gypsyjr777")
+        property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/test/jacocoTestReport.xml")
     }
 }

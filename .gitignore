@@ -24,6 +24,8 @@ app/db/*.sqlite3
 app/doc/**/*.txt
 app/.gradle
 app/build/
+jte-classes/
+app/jte-classes/
 !app/gradle/wrapper/gradle-wrapper.jar
 !app/**/src/main/**/build/
 !app/**/src/test/**/build/

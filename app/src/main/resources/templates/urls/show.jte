@@ -28,6 +28,23 @@
                         </tr>
                     </tbody>
                 </table>
+                <form method="post" action="/urls/${url.id()}/checks" class="mb-4">
+                    <input type="submit" value="Запустить проверку" class="btn btn-primary">
+                </form>
+                <table data-test="checks" class="table table-bordered table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Код ответа</th>
+                            <th>h1</th>
+                            <th>title</th>
+                            <th>description</th>
+                            <th>Дата создания</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
             </div>
         </div>
     `

@@ -19,7 +19,10 @@ public final class DatabaseConfig {
     }
 
     private static String resolveJdbcUrl() {
-        String jdbcUrl = System.getenv("JDBC_DATABASE_URL");
+        String jdbcUrl = System.getProperty("JDBC_DATABASE_URL");
+        if (jdbcUrl == null || jdbcUrl.isBlank()) {
+            jdbcUrl = System.getenv("JDBC_DATABASE_URL");
+        }
         return jdbcUrl == null || jdbcUrl.isBlank() ? DEFAULT_JDBC_URL : jdbcUrl;
     }
 }
