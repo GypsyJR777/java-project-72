@@ -49,7 +49,10 @@ public final class App {
         app.post("/urls", ctx -> handleCreateUrl(ctx, urlRepository));
         app.get("/urls", ctx -> renderUrlsPage(ctx, urlRepository, urlCheckRepository));
         app.get("/urls/{id}", ctx -> renderUrlPage(ctx, urlRepository, urlCheckRepository));
-        app.post("/urls/{id}/checks", ctx -> handleCreateCheck(ctx, urlRepository, urlCheckRepository, urlCheckService));
+        app.post(
+            "/urls/{id}/checks",
+            ctx -> handleCreateCheck(ctx, urlRepository, urlCheckRepository, urlCheckService)
+        );
         return app;
     }
 
