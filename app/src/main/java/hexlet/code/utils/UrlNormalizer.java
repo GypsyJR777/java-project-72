@@ -14,7 +14,10 @@ public final class UrlNormalizer {
         int port = uri.getPort();
         String authority = uri.getRawAuthority();
 
-        if (!isSupportedScheme(protocol) || host == null || host.isBlank() || port > MAX_PORT || authority == null || authority.isBlank()) {
+        if (
+                !isSupportedScheme(protocol) || host == null || host.isBlank()
+                        || port > MAX_PORT || authority == null || authority.isBlank()
+        ) {
             throw new IllegalArgumentException("URL is invalid");
         }
 
