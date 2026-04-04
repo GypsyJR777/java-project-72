@@ -6,10 +6,12 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import javax.sql.DataSource;
 
 public final class UrlCheckRepository extends BaseRepository {
@@ -17,7 +19,7 @@ public final class UrlCheckRepository extends BaseRepository {
         super(dataSource);
     }
 
-    public UrlCheck save(UrlCheck urlCheck) throws SQLException {
+    public Optional<UrlCheck> save(UrlCheck urlCheck) throws SQLException {
         String sql = """
             INSERT INTO url_checks (url_id, status_code, h1, title, description, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -32,12 +34,12 @@ public final class UrlCheckRepository extends BaseRepository {
             statement.setString(3, urlCheck.h1());
             statement.setString(4, urlCheck.title());
             statement.setString(5, urlCheck.description());
-            statement.setTimestamp(6, urlCheck.createdAt());
+            statement.setTimestamp(6, Timestamp.from(urlCheck.createdAt()));
             statement.executeUpdate();
 
             try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
-                    return new UrlCheck(
+                    return Optional.of(new UrlCheck(
                         generatedKeys.getLong(1),
                         urlCheck.statusCode(),
                         urlCheck.title(),
@@ -45,12 +47,12 @@ public final class UrlCheckRepository extends BaseRepository {
                         urlCheck.description(),
                         urlCheck.urlId(),
                         urlCheck.createdAt()
-                    );
+                    ));
                 }
             }
         }
 
-        throw new SQLException("Failed to save URL check");
+        return Optional.empty();
     }
 
     public List<UrlCheck> findByUrlId(long urlId) throws SQLException {
@@ -108,7 +110,7 @@ public final class UrlCheckRepository extends BaseRepository {
             resultSet.getString("h1"),
             resultSet.getString("description"),
             resultSet.getLong("url_id"),
-            resultSet.getTimestamp("created_at")
+            resultSet.getTimestamp("created_at").toInstant()
         );
     }
 }

@@ -8,10 +8,12 @@ import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
 import hexlet.code.utils.UrlNormalizer;
 import io.javalin.Javalin;
+import io.javalin.http.HttpStatus;
 import java.io.IOException;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,7 +23,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -29,11 +30,11 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -86,7 +87,7 @@ class AppTest {
     void rootPageRendersMainForm() throws IOException, InterruptedException {
         HttpResponse<String> response = get("/");
 
-        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), response.statusCode());
         Assertions.assertTrue(response.body().contains("name=\"url\""));
         Assertions.assertTrue(response.body().contains("action=\"/urls\""));
     }
@@ -95,7 +96,7 @@ class AppTest {
     void invalidUrlReturnsStatus422() throws IOException, InterruptedException {
         HttpResponse<String> response = postForm("/urls", "url", "not-a-url");
 
-        Assertions.assertEquals(422, response.statusCode());
+        Assertions.assertEquals(HttpStatus.UNPROCESSABLE_CONTENT.getCode(), response.statusCode());
         Assertions.assertTrue(response.body().contains("Некорректный URL"));
         Assertions.assertTrue(response.body().contains("value=\"not-a-url\""));
     }
@@ -103,13 +104,14 @@ class AppTest {
     @Test
     void createUrlSavesEntityAndRedirectsToShowPage() throws IOException, InterruptedException, SQLException {
         HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/path?q=1");
+        Url savedUrl = findByName("https://example.com").orElseThrow();
 
-        Assertions.assertEquals(302, createResponse.statusCode());
-        Assertions.assertEquals("/urls/1", createResponse.headers().firstValue("Location").orElseThrow());
-
-        Optional<Url> savedUrl = findByName("https://example.com");
-        Assertions.assertTrue(savedUrl.isPresent());
-        Assertions.assertEquals(1L, savedUrl.get().id());
+        Assertions.assertEquals(HttpStatus.FOUND.getCode(), createResponse.statusCode());
+        Assertions.assertEquals(
+            "/urls/" + savedUrl.id(),
+            createResponse.headers().firstValue("Location").orElseThrow()
+        );
+        Assertions.assertEquals("https://example.com", savedUrl.name());
     }
 
     @Test
@@ -118,7 +120,7 @@ class AppTest {
 
         HttpResponse<String> response = get("/urls/" + savedUrl.id());
 
-        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), response.statusCode());
         Assertions.assertTrue(response.body().contains("data-test=\"url\""));
         Assertions.assertTrue(response.body().contains("https://example.com"));
         Assertions.assertTrue(response.body().contains("action=\"/urls/" + savedUrl.id() + "/checks\""));
@@ -132,7 +134,7 @@ class AppTest {
 
         HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/another/path");
 
-        Assertions.assertEquals(302, createResponse.statusCode());
+        Assertions.assertEquals(HttpStatus.FOUND.getCode(), createResponse.statusCode());
         Assertions.assertEquals(
             "/urls/" + existingUrl.id(),
             createResponse.headers().firstValue("Location").orElseThrow()
@@ -147,7 +149,7 @@ class AppTest {
 
         HttpResponse<String> response = get("/urls");
 
-        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), response.statusCode());
         Assertions.assertTrue(response.body().contains("data-test=\"urls\""));
         Assertions.assertTrue(response.body().contains("/urls/" + olderUrl.id()));
         Assertions.assertTrue(response.body().contains("/urls/" + newerUrl.id()));
@@ -157,16 +159,19 @@ class AppTest {
     @Test
     void createCheckSavesEntityAndRedirectsToUrlPage() throws Exception {
         enqueueHtmlResponse(200, longHtmlPage());
-        saveUrl(mockWebServer.url("/page").toString(), "2026-03-31T00:00:00Z");
+        Url savedUrl = saveUrl(mockWebServer.url("/page").toString(), "2026-03-31T00:00:00Z");
 
-        HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
+        HttpResponse<String> checkResponse = postEmpty("/urls/" + savedUrl.id() + "/checks");
+        List<UrlCheck> checks = findChecksByUrlId(savedUrl.id());
+        UrlCheck savedCheck = checks.getFirst();
 
-        Assertions.assertEquals(302, checkResponse.statusCode());
-        Assertions.assertEquals("/urls/1", checkResponse.headers().firstValue("Location").orElseThrow());
-
-        List<UrlCheck> checks = findChecksByUrlId(1L);
+        Assertions.assertEquals(HttpStatus.FOUND.getCode(), checkResponse.statusCode());
+        Assertions.assertEquals("/urls/" + savedUrl.id(), checkResponse.headers().firstValue("Location").orElseThrow());
         Assertions.assertEquals(1, checks.size());
-        Assertions.assertEquals(200, checks.get(0).statusCode());
+        Assertions.assertEquals(200, savedCheck.statusCode());
+        Assertions.assertEquals("Very long title ".repeat(20).trim(), savedCheck.title());
+        Assertions.assertEquals("Very long h1 ".repeat(25).trim(), savedCheck.h1());
+        Assertions.assertEquals("Very long description ".repeat(20), savedCheck.description());
     }
 
     @Test
@@ -179,19 +184,20 @@ class AppTest {
                 "Very long h1 ".repeat(25),
                 "Very long description ".repeat(20),
                 url.id(),
-                Timestamp.from(Instant.parse("2026-03-31T01:00:00Z"))
+                Instant.parse("2026-03-31T01:00:00Z")
             )
         );
 
         HttpResponse<String> showResponse = get("/urls/" + url.id());
 
-        Assertions.assertEquals(200, showResponse.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), showResponse.statusCode());
         Assertions.assertTrue(showResponse.body().contains("data-test=\"checks\""));
         Assertions.assertTrue(showResponse.body().contains("<td>1</td>"));
         Assertions.assertTrue(showResponse.body().contains("<td>200</td>"));
         Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long h1 ".repeat(25))));
         Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long title ".repeat(20))));
         Assertions.assertTrue(showResponse.body().contains(expectedTruncated("Very long description ".repeat(20))));
+        Assertions.assertTrue(showResponse.body().contains("2026-03-31 01:00:00"));
     }
 
     @Test
@@ -204,40 +210,41 @@ class AppTest {
                 "Hello",
                 "desc",
                 url.id(),
-                Timestamp.from(Instant.parse("2026-03-31T01:00:00Z"))
+                Instant.parse("2026-03-31T01:00:00Z")
             )
         );
 
         HttpResponse<String> response = get("/urls");
 
-        Assertions.assertEquals(200, response.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), response.statusCode());
         Assertions.assertTrue(response.body().contains("data-test=\"urls\""));
         Assertions.assertTrue(response.body().contains("<th>Код ответа</th>"));
         Assertions.assertTrue(response.body().contains("200"));
         Assertions.assertTrue(response.body().contains("http://localhost:" + mockWebServer.getPort()));
+        Assertions.assertTrue(response.body().contains("2026-03-31 01:00:00"));
     }
 
     @Test
     void failedCheckDoesNotCreateRecord() throws Exception {
         enqueueHtmlResponse(500, "<html><body>Error</body></html>");
-        saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
+        Url savedUrl = saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
 
-        HttpResponse<String> checkResponse = postEmpty("/urls/1/checks");
+        HttpResponse<String> checkResponse = postEmpty("/urls/" + savedUrl.id() + "/checks");
 
-        Assertions.assertEquals(302, checkResponse.statusCode());
-        Assertions.assertEquals("/urls/1", checkResponse.headers().firstValue("Location").orElseThrow());
-        Assertions.assertTrue(findChecksByUrlId(1L).isEmpty());
+        Assertions.assertEquals(HttpStatus.FOUND.getCode(), checkResponse.statusCode());
+        Assertions.assertEquals("/urls/" + savedUrl.id(), checkResponse.headers().firstValue("Location").orElseThrow());
+        Assertions.assertTrue(findChecksByUrlId(savedUrl.id()).isEmpty());
     }
 
     @Test
     void showUrlPageDisplaysFailedCheckFlashMessage() throws Exception {
         enqueueHtmlResponse(500, "<html><body>Error</body></html>");
-        saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
-        postEmpty("/urls/1/checks");
+        Url savedUrl = saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
+        postEmpty("/urls/" + savedUrl.id() + "/checks");
 
-        HttpResponse<String> showResponse = get("/urls/1");
+        HttpResponse<String> showResponse = get("/urls/" + savedUrl.id());
 
-        Assertions.assertEquals(200, showResponse.statusCode());
+        Assertions.assertEquals(HttpStatus.OK.getCode(), showResponse.statusCode());
         Assertions.assertTrue(showResponse.body().contains("Произошла ошибка при проверке"));
     }
 
@@ -245,44 +252,45 @@ class AppTest {
     void missingUrlReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = get("/urls/999");
 
-        Assertions.assertEquals(404, response.statusCode());
+        Assertions.assertEquals(HttpStatus.NOT_FOUND.getCode(), response.statusCode());
     }
 
     @Test
     void nonNumericUrlIdReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = get("/urls/not-a-number");
 
-        Assertions.assertEquals(404, response.statusCode());
+        Assertions.assertEquals(HttpStatus.NOT_FOUND.getCode(), response.statusCode());
     }
 
     @Test
     void checkMissingUrlReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = postEmpty("/urls/999/checks");
 
-        Assertions.assertEquals(404, response.statusCode());
+        Assertions.assertEquals(HttpStatus.NOT_FOUND.getCode(), response.statusCode());
     }
 
     @Test
     void checkNonNumericUrlReturns404() throws IOException, InterruptedException {
         HttpResponse<String> response = postEmpty("/urls/not-a-number/checks");
 
-        Assertions.assertEquals(404, response.statusCode());
+        Assertions.assertEquals(HttpStatus.NOT_FOUND.getCode(), response.statusCode());
     }
 
     @Test
     void flashMessageIsConsumedAfterFirstRead() throws IOException, InterruptedException {
-        postForm("/urls", "url", "https://example.com/path?q=1");
+        HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/path?q=1");
+        String location = createResponse.headers().firstValue("Location").orElseThrow();
 
-        HttpResponse<String> firstResponse = get("/urls/1");
-        HttpResponse<String> secondResponse = get("/urls/1");
+        HttpResponse<String> firstResponse = get(location);
+        HttpResponse<String> secondResponse = get(location);
 
         Assertions.assertTrue(firstResponse.body().contains("Страница успешно добавлена"));
         Assertions.assertFalse(secondResponse.body().contains("Страница успешно добавлена"));
     }
 
     @Test
-    void normalizeUrlStripsPathAndKeepsPort() {
-        String normalizedUrl = UrlNormalizer.normalize("https://some-domain.org:8080/example/path");
+    void normalizeUrlStripsPathAndKeepsPort() throws Exception {
+        String normalizedUrl = UrlNormalizer.normalize(new URI("https://some-domain.org:8080/example/path"));
 
         Assertions.assertEquals("https://some-domain.org:8080", normalizedUrl);
     }
@@ -291,20 +299,15 @@ class AppTest {
     void normalizeUrlRejectsBlankValue() {
         IllegalArgumentException exception = Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> UrlNormalizer.normalize("   ")
+            () -> UrlNormalizer.normalize(URI.create(""))
         );
 
-        Assertions.assertEquals("URL is blank", exception.getMessage());
+        Assertions.assertEquals("URL is invalid", exception.getMessage());
     }
 
     @Test
     void normalizeUrlRejectsMalformedValue() {
-        IllegalArgumentException exception = Assertions.assertThrows(
-            IllegalArgumentException.class,
-            () -> UrlNormalizer.normalize("https://exa mple.com")
-        );
-
-        Assertions.assertEquals("URL is invalid", exception.getMessage());
+        Assertions.assertThrows(URISyntaxException.class, () -> new URI("https://exa mple.com"));
     }
 
     @Test
@@ -346,13 +349,10 @@ class AppTest {
     }
 
     @Test
-    void repositorySaveThrowsWhenGeneratedKeysAreMissing() {
+    void repositorySaveReturnsEmptyWhenGeneratedKeysAreMissing() throws SQLException {
         UrlRepository repository = new UrlRepository(dataSourceWithoutGeneratedKeys());
 
-        Assertions.assertThrows(
-            SQLException.class,
-            () -> repository.save(new Url("https://example.com", Timestamp.from(Instant.now())))
-        );
+        Assertions.assertTrue(repository.save(new Url("https://example.com", Instant.now())).isEmpty());
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
@@ -391,7 +391,8 @@ class AppTest {
     private Url saveUrl(String name, String createdAt) throws SQLException {
         try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
             UrlRepository repository = new UrlRepository(dataSource);
-            return repository.save(new Url(name, Timestamp.from(Instant.parse(createdAt))));
+            return repository.save(new Url(name, Instant.parse(createdAt)))
+                .orElseThrow(() -> new SQLException("Failed to save URL"));
         }
     }
 
@@ -419,7 +420,7 @@ class AppTest {
     private UrlCheck saveUrlCheck(UrlCheck urlCheck) throws SQLException {
         try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
             UrlCheckRepository repository = new UrlCheckRepository(dataSource);
-            return repository.save(urlCheck);
+            return repository.save(urlCheck).orElseThrow(() -> new SQLException("Failed to save URL check"));
         }
     }
 

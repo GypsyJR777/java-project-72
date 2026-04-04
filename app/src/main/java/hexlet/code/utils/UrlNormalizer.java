@@ -1,31 +1,29 @@
 package hexlet.code.utils;
 
-import java.net.MalformedURLException;
 import java.net.URI;
-import java.net.URISyntaxException;
 
 public final class UrlNormalizer {
+    private static final int MAX_PORT = 65535;
+
     private UrlNormalizer() {
     }
 
-    public static String normalize(String rawUrl) {
-        if (rawUrl == null || rawUrl.isBlank()) {
-            throw new IllegalArgumentException("URL is blank");
+    public static String normalize(URI uri) {
+        String protocol = uri.getScheme();
+        String host = uri.getHost();
+        int port = uri.getPort();
+        String authority = uri.getRawAuthority();
+
+        if (!isSupportedScheme(protocol) || host == null || host.isBlank() || port > MAX_PORT || authority == null || authority.isBlank()) {
+            throw new IllegalArgumentException("URL is invalid");
         }
 
-        try {
-            URI uri = new URI(rawUrl);
-            java.net.URL parsedUrl = uri.toURL();
-            String protocol = parsedUrl.getProtocol();
-            String authority = parsedUrl.getAuthority();
+        return port == -1
+                ? protocol + "://" + host
+                : protocol + "://" + host + ":" + port;
+    }
 
-            if (protocol == null || protocol.isBlank() || authority == null || authority.isBlank()) {
-                throw new IllegalArgumentException("URL is invalid");
-            }
-
-            return protocol + "://" + authority;
-        } catch (URISyntaxException | MalformedURLException e) {
-            throw new IllegalArgumentException("URL is invalid", e);
-        }
+    private static boolean isSupportedScheme(String protocol) {
+        return "http".equalsIgnoreCase(protocol) || "https".equalsIgnoreCase(protocol);
     }
 }

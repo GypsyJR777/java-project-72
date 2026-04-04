@@ -1,9 +1,9 @@
 package hexlet.code.model;
 
-import java.sql.Timestamp;
+import java.time.Instant;
 
-public record Url(Long id, String name, Timestamp createdAt) {
-    public Url(String name, Timestamp createdAt) {
+public record Url(Long id, String name, Instant createdAt) {
+    public Url(String name, Instant createdAt) {
         this(null, name, createdAt);
     }
 }

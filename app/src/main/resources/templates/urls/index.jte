@@ -1,5 +1,6 @@
 @import hexlet.code.model.Url
 @import hexlet.code.model.UrlCheck
+@import hexlet.code.utils.ViewUtils
 @import java.util.List
 @import java.util.Map
 
@@ -33,7 +34,7 @@
                                 <td>
                                     ${latestChecks.get(url.id()) == null
                                         ? ""
-                                        : latestChecks.get(url.id()).createdAt().toLocalDateTime().toLocalDate().toString()}
+                                        : ViewUtils.formatDateTime(latestChecks.get(url.id()).createdAt())}
                                 </td>
                                 <td>
                                     ${latestChecks.get(url.id()) == null

@@ -1,5 +1,6 @@
 @import hexlet.code.model.Url
 @import hexlet.code.model.UrlCheck
+@import hexlet.code.utils.ViewUtils
 @import java.util.List
 
 @param String flashType
@@ -27,7 +28,7 @@
                         </tr>
                         <tr>
                             <td>Дата создания</td>
-                            <td>${url.createdAt().toLocalDateTime().toLocalDate().toString()}</td>
+                            <td>${ViewUtils.formatDateTime(url.createdAt())}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -50,10 +51,10 @@
                             <tr>
                                 <td>${check.id()}</td>
                                 <td>${check.statusCode()}</td>
-                                <td>${check.h1ForDisplay()}</td>
-                                <td>${check.titleForDisplay()}</td>
-                                <td>${check.descriptionForDisplay()}</td>
-                                <td>${check.createdAt().toLocalDateTime().toLocalDate().toString()}</td>
+                                <td>${ViewUtils.truncate(check.h1())}</td>
+                                <td>${ViewUtils.truncate(check.title())}</td>
+                                <td>${ViewUtils.truncate(check.description())}</td>
+                                <td>${ViewUtils.formatDateTime(check.createdAt())}</td>
                             </tr>
                         @endfor
                     </tbody>

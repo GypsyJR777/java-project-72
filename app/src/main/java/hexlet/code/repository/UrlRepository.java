@@ -72,7 +72,7 @@ public final class UrlRepository extends BaseRepository {
         return urls;
     }
 
-    public Url save(Url url) throws SQLException {
+    public Optional<Url> save(Url url) throws SQLException {
         String sql = "INSERT INTO urls (name, created_at) VALUES (?, ?)";
 
         try (
@@ -80,23 +80,23 @@ public final class UrlRepository extends BaseRepository {
             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
         ) {
             statement.setString(1, url.name());
-            statement.setTimestamp(2, url.createdAt());
+            statement.setTimestamp(2, Timestamp.from(url.createdAt()));
             statement.executeUpdate();
 
             try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
-                    return new Url(generatedKeys.getLong(1), url.name(), url.createdAt());
+                    return Optional.of(new Url(generatedKeys.getLong(1), url.name(), url.createdAt()));
                 }
             }
         }
 
-        throw new SQLException("Failed to save URL");
+        return Optional.empty();
     }
 
     private Url buildUrl(ResultSet resultSet) throws SQLException {
         long id = resultSet.getLong("id");
         String name = resultSet.getString("name");
         Timestamp createdAt = resultSet.getTimestamp("created_at");
-        return new Url(id, name, createdAt);
+        return new Url(id, name, createdAt.toInstant());
     }
 }
