@@ -358,8 +358,8 @@ class AppTest {
     void databaseConfigUsesDefaultJdbcUrlWhenPropertyIsMissing() {
         System.clearProperty(JDBC_PROPERTY);
 
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            Assertions.assertTrue(dataSource.getJdbcUrl().startsWith("jdbc:h2:mem:project"));
+        try (HikariDataSource configDataSource = DatabaseConfig.getDataSource()) {
+            Assertions.assertTrue(configDataSource.getJdbcUrl().startsWith("jdbc:h2:mem:project"));
         }
     }
 
@@ -368,8 +368,8 @@ class AppTest {
         String jdbcUrl = "jdbc:h2:mem:custom_db;DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
         System.setProperty(JDBC_PROPERTY, jdbcUrl);
 
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            Assertions.assertEquals(jdbcUrl, dataSource.getJdbcUrl());
+        try (HikariDataSource configDataSource = DatabaseConfig.getDataSource()) {
+            Assertions.assertEquals(jdbcUrl, configDataSource.getJdbcUrl());
         }
     }
 
@@ -445,12 +445,12 @@ class AppTest {
 
     private DataSource dataSourceWithoutGeneratedKeys() {
         try {
-            DataSource dataSource = Mockito.mock(DataSource.class);
+            DataSource mockedDataSource = Mockito.mock(DataSource.class);
             Connection connection = Mockito.mock(Connection.class);
             PreparedStatement statement = Mockito.mock(PreparedStatement.class);
             ResultSet generatedKeys = Mockito.mock(ResultSet.class);
 
-            Mockito.when(dataSource.getConnection()).thenReturn(connection);
+            Mockito.when(mockedDataSource.getConnection()).thenReturn(connection);
             Mockito.when(
                 connection.prepareStatement(Mockito.anyString(), Mockito.eq(PreparedStatement.RETURN_GENERATED_KEYS))
             )
@@ -459,7 +459,7 @@ class AppTest {
             Mockito.when(statement.executeUpdate()).thenReturn(1);
             Mockito.when(generatedKeys.next()).thenReturn(false);
 
-            return dataSource;
+            return mockedDataSource;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to create mock DataSource", e);
         }
