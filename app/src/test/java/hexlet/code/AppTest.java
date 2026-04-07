@@ -25,7 +25,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import okhttp3.mockwebserver.MockResponse;
@@ -43,8 +42,11 @@ class AppTest {
     private static MockWebServer mockWebServer;
 
     private Javalin app;
+    private HikariDataSource dataSource;
     private HttpClient client;
     private String baseUrl;
+    private UrlRepository urlRepository;
+    private UrlCheckRepository urlCheckRepository;
 
     @BeforeAll
     static void startMockServer() throws IOException {
@@ -69,6 +71,10 @@ class AppTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
+        dataSource = DatabaseConfig.getDataSource();
+        urlRepository = new UrlRepository(dataSource);
+        urlCheckRepository = new UrlCheckRepository(dataSource);
+
         app = App.getApp();
         app.start(0);
         baseUrl = "http://127.0.0.1:" + app.port();
@@ -78,6 +84,9 @@ class AppTest {
     void tearDown() {
         if (app != null) {
             app.stop();
+        }
+        if (dataSource != null) {
+            dataSource.close();
         }
         System.clearProperty("PORT");
         System.clearProperty(JDBC_PROPERTY);
@@ -104,9 +113,10 @@ class AppTest {
     @Test
     void createUrlSavesEntityAndRedirectsToShowPage() throws IOException, InterruptedException, SQLException {
         HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/path?q=1");
-        Url savedUrl = findByName("https://example.com").orElseThrow();
+        Url savedUrl = urlRepository.findByName("https://example.com").orElse(null);
 
         Assertions.assertEquals(HttpStatus.FOUND.getCode(), createResponse.statusCode());
+        Assertions.assertNotNull(savedUrl);
         Assertions.assertEquals(
             "/urls/" + savedUrl.id(),
             createResponse.headers().firstValue("Location").orElseThrow()
@@ -116,7 +126,9 @@ class AppTest {
 
     @Test
     void showUrlPageDisplaysSavedUrl() throws IOException, InterruptedException, SQLException {
-        Url savedUrl = saveUrl("https://example.com", "2026-03-31T00:00:00Z");
+        Url savedUrl = urlRepository.save(
+            new Url("https://example.com", Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
 
         HttpResponse<String> response = get("/urls/" + savedUrl.id());
 
@@ -130,7 +142,9 @@ class AppTest {
     @Test
     void existingUrlDoesNotCreateDuplicateAndRedirectsToExistingPage()
         throws IOException, InterruptedException, SQLException {
-        Url existingUrl = saveUrl("https://example.com", "2026-03-31T00:00:00Z");
+        Url existingUrl = urlRepository.save(
+            new Url("https://example.com", Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
 
         HttpResponse<String> createResponse = postForm("/urls", "url", "https://example.com/another/path");
 
@@ -139,13 +153,17 @@ class AppTest {
             "/urls/" + existingUrl.id(),
             createResponse.headers().firstValue("Location").orElseThrow()
         );
-        Assertions.assertEquals(1, findAllUrls().size());
+        Assertions.assertEquals(1, urlRepository.findAll().size());
     }
 
     @Test
     void urlsPageShowsNewestUrlsFirst() throws IOException, InterruptedException, SQLException {
-        Url olderUrl = saveUrl("https://older.example.com", "2026-03-29T00:00:00Z");
-        Url newerUrl = saveUrl("https://newer.example.com", "2026-03-30T00:00:00Z");
+        Url olderUrl = urlRepository.save(
+            new Url("https://older.example.com", Instant.parse("2026-03-29T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
+        Url newerUrl = urlRepository.save(
+            new Url("https://newer.example.com", Instant.parse("2026-03-30T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
 
         HttpResponse<String> response = get("/urls");
 
@@ -159,10 +177,12 @@ class AppTest {
     @Test
     void createCheckSavesEntityAndRedirectsToUrlPage() throws Exception {
         enqueueHtmlResponse(200, longHtmlPage());
-        Url savedUrl = saveUrl(mockWebServer.url("/page").toString(), "2026-03-31T00:00:00Z");
+        Url savedUrl = urlRepository.save(
+            new Url(mockWebServer.url("/page").toString(), Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
 
         HttpResponse<String> checkResponse = postEmpty("/urls/" + savedUrl.id() + "/checks");
-        List<UrlCheck> checks = findChecksByUrlId(savedUrl.id());
+        List<UrlCheck> checks = urlCheckRepository.findByUrlId(savedUrl.id());
         UrlCheck savedCheck = checks.getFirst();
 
         Assertions.assertEquals(HttpStatus.FOUND.getCode(), checkResponse.statusCode());
@@ -176,8 +196,10 @@ class AppTest {
 
     @Test
     void showUrlPageDisplaysSavedChecks() throws IOException, InterruptedException, SQLException {
-        Url url = saveUrl("https://example.com", "2026-03-31T00:00:00Z");
-        saveUrlCheck(
+        Url url = urlRepository.save(
+            new Url("https://example.com", Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
+        urlCheckRepository.save(
             new UrlCheck(
                 200,
                 "Very long title ".repeat(20),
@@ -186,7 +208,7 @@ class AppTest {
                 url.id(),
                 Instant.parse("2026-03-31T01:00:00Z")
             )
-        );
+        ).orElseThrow(() -> new SQLException("Failed to save URL check"));
 
         HttpResponse<String> showResponse = get("/urls/" + url.id());
 
@@ -202,8 +224,10 @@ class AppTest {
 
     @Test
     void urlsPageShowsLatestCheckStatusAndDate() throws Exception {
-        Url url = saveUrl(mockWebServer.url("/latest").toString(), "2026-03-31T00:00:00Z");
-        saveUrlCheck(
+        Url url = urlRepository.save(
+            new Url(mockWebServer.url("/latest").toString(), Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
+        urlCheckRepository.save(
             new UrlCheck(
                 200,
                 "Home",
@@ -212,7 +236,7 @@ class AppTest {
                 url.id(),
                 Instant.parse("2026-03-31T01:00:00Z")
             )
-        );
+        ).orElseThrow(() -> new SQLException("Failed to save URL check"));
 
         HttpResponse<String> response = get("/urls");
 
@@ -227,19 +251,23 @@ class AppTest {
     @Test
     void failedCheckDoesNotCreateRecord() throws Exception {
         enqueueHtmlResponse(500, "<html><body>Error</body></html>");
-        Url savedUrl = saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
+        Url savedUrl = urlRepository.save(
+            new Url(mockWebServer.url("/error").toString(), Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
 
         HttpResponse<String> checkResponse = postEmpty("/urls/" + savedUrl.id() + "/checks");
 
         Assertions.assertEquals(HttpStatus.FOUND.getCode(), checkResponse.statusCode());
         Assertions.assertEquals("/urls/" + savedUrl.id(), checkResponse.headers().firstValue("Location").orElseThrow());
-        Assertions.assertTrue(findChecksByUrlId(savedUrl.id()).isEmpty());
+        Assertions.assertTrue(urlCheckRepository.findByUrlId(savedUrl.id()).isEmpty());
     }
 
     @Test
     void showUrlPageDisplaysFailedCheckFlashMessage() throws Exception {
         enqueueHtmlResponse(500, "<html><body>Error</body></html>");
-        Url savedUrl = saveUrl(mockWebServer.url("/error").toString(), "2026-03-31T00:00:00Z");
+        Url savedUrl = urlRepository.save(
+            new Url(mockWebServer.url("/error").toString(), Instant.parse("2026-03-31T00:00:00Z"))
+        ).orElseThrow(() -> new SQLException("Failed to save URL"));
         postEmpty("/urls/" + savedUrl.id() + "/checks");
 
         HttpResponse<String> showResponse = get("/urls/" + savedUrl.id());
@@ -290,19 +318,16 @@ class AppTest {
 
     @Test
     void normalizeUrlStripsPathAndKeepsPort() throws Exception {
-        String normalizedUrl = UrlNormalizer.normalize(new URI("https://some-domain.org:8080/example/path"));
+        String normalizedUrl = UrlNormalizer.normalize(
+            new URI("https://some-domain.org:8080/example/path")
+        ).orElseThrow();
 
         Assertions.assertEquals("https://some-domain.org:8080", normalizedUrl);
     }
 
     @Test
     void normalizeUrlRejectsBlankValue() {
-        IllegalArgumentException exception = Assertions.assertThrows(
-            IllegalArgumentException.class,
-            () -> UrlNormalizer.normalize(URI.create(""))
-        );
-
-        Assertions.assertEquals("URL is invalid", exception.getMessage());
+        Assertions.assertTrue(UrlNormalizer.normalize(URI.create("")).isEmpty());
     }
 
     @Test
@@ -386,42 +411,6 @@ class AppTest {
         return URLEncoder.encode(name, StandardCharsets.UTF_8)
             + "="
             + URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    private Url saveUrl(String name, String createdAt) throws SQLException {
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            UrlRepository repository = new UrlRepository(dataSource);
-            return repository.save(new Url(name, Instant.parse(createdAt)))
-                .orElseThrow(() -> new SQLException("Failed to save URL"));
-        }
-    }
-
-    private Optional<Url> findByName(String name) throws SQLException {
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            UrlRepository repository = new UrlRepository(dataSource);
-            return repository.findByName(name);
-        }
-    }
-
-    private List<Url> findAllUrls() throws SQLException {
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            UrlRepository repository = new UrlRepository(dataSource);
-            return repository.findAll();
-        }
-    }
-
-    private List<UrlCheck> findChecksByUrlId(long urlId) throws SQLException {
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            UrlCheckRepository repository = new UrlCheckRepository(dataSource);
-            return repository.findByUrlId(urlId);
-        }
-    }
-
-    private UrlCheck saveUrlCheck(UrlCheck urlCheck) throws SQLException {
-        try (HikariDataSource dataSource = DatabaseConfig.getDataSource()) {
-            UrlCheckRepository repository = new UrlCheckRepository(dataSource);
-            return repository.save(urlCheck).orElseThrow(() -> new SQLException("Failed to save URL check"));
-        }
     }
 
     private void enqueueHtmlResponse(int statusCode, String body) {

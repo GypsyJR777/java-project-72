@@ -1,6 +1,7 @@
 package hexlet.code.utils;
 
 import java.net.URI;
+import java.util.Optional;
 
 public final class UrlNormalizer {
     private static final int MAX_PORT = 65535;
@@ -8,22 +9,23 @@ public final class UrlNormalizer {
     private UrlNormalizer() {
     }
 
-    public static String normalize(URI uri) {
+    public static Optional<String> normalize(URI uri) {
         String protocol = uri.getScheme();
         String host = uri.getHost();
         int port = uri.getPort();
-        String authority = uri.getRawAuthority();
 
-        if (
-                !isSupportedScheme(protocol) || host == null || host.isBlank()
-                        || port > MAX_PORT || authority == null || authority.isBlank()
-        ) {
-            throw new IllegalArgumentException("URL is invalid");
+        if (!isSupportedScheme(protocol) || host == null || host.isBlank() || port > MAX_PORT) {
+            return Optional.empty();
         }
 
-        return port == -1
-                ? protocol + "://" + host
-                : protocol + "://" + host + ":" + port;
+        String normalizedUrl = String.format(
+            "%s://%s%s",
+            protocol,
+            host,
+            port == -1 ? "" : ":" + port
+        ).toLowerCase();
+
+        return Optional.of(normalizedUrl);
     }
 
     private static boolean isSupportedScheme(String protocol) {

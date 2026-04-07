@@ -42,33 +42,28 @@ public final class UrlController {
     public void createUrl(Context ctx) throws SQLException {
         String rawUrl = Optional.ofNullable(ctx.formParam("url")).orElse("").trim();
 
-        URI parsedUrl;
         try {
-            parsedUrl = new URI(rawUrl);
+            URI parsedUrl = new URI(rawUrl);
+            String normalizedUrl = UrlNormalizer.normalize(parsedUrl).orElse(null);
+            if (normalizedUrl == null) {
+                renderInvalidUrl(ctx, rawUrl);
+                return;
+            }
+
+            Url existingUrl = urlRepository.findByName(normalizedUrl).orElse(null);
+            if (existingUrl != null) {
+                setFlash(ctx, "info", "Страница уже существует");
+                ctx.redirect(urlPath(existingUrl.id()));
+                return;
+            }
+
+            Url savedUrl = urlRepository.save(new Url(normalizedUrl, Instant.now()))
+                .orElseThrow(() -> new SQLException("Failed to save URL"));
+            setFlash(ctx, "success", "Страница успешно добавлена");
+            ctx.redirect(urlPath(savedUrl.id()));
         } catch (URISyntaxException e) {
             renderInvalidUrl(ctx, rawUrl);
-            return;
         }
-
-        String normalizedUrl;
-        try {
-            normalizedUrl = UrlNormalizer.normalize(parsedUrl);
-        } catch (IllegalArgumentException e) {
-            renderInvalidUrl(ctx, rawUrl);
-            return;
-        }
-
-        Url existingUrl = urlRepository.findByName(normalizedUrl).orElse(null);
-        if (existingUrl != null) {
-            setFlash(ctx, "info", "Страница уже существует");
-            ctx.redirect(urlPath(existingUrl.id()));
-            return;
-        }
-
-        Url savedUrl = urlRepository.save(new Url(normalizedUrl, Instant.now()))
-            .orElseThrow(() -> new SQLException("Failed to save URL"));
-        setFlash(ctx, "success", "Страница успешно добавлена");
-        ctx.redirect(urlPath(savedUrl.id()));
     }
 
     public void showUrlsPage(Context ctx) throws SQLException {
