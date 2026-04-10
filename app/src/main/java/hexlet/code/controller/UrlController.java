@@ -1,5 +1,6 @@
 package hexlet.code.controller;
 
+import hexlet.code.exception.DatabaseException;
 import hexlet.code.model.Url;
 import hexlet.code.model.UrlCheck;
 import hexlet.code.repository.UrlCheckRepository;
@@ -10,7 +11,6 @@ import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -39,34 +39,37 @@ public final class UrlController {
         renderHomePage(ctx, "", null, null);
     }
 
-    public void createUrl(Context ctx) throws SQLException {
+    public void createUrl(Context ctx) {
         String rawUrl = Optional.ofNullable(ctx.formParam("url")).orElse("").trim();
+        URI parsedUrl;
 
         try {
-            URI parsedUrl = new URI(rawUrl);
-            String normalizedUrl = UrlNormalizer.normalize(parsedUrl).orElse(null);
-            if (normalizedUrl == null) {
-                renderInvalidUrl(ctx, rawUrl);
-                return;
-            }
-
-            Url existingUrl = urlRepository.findByName(normalizedUrl).orElse(null);
-            if (existingUrl != null) {
-                setFlash(ctx, "info", "Страница уже существует");
-                ctx.redirect(urlPath(existingUrl.id()));
-                return;
-            }
-
-            Url savedUrl = urlRepository.save(new Url(normalizedUrl, Instant.now()))
-                .orElseThrow(() -> new SQLException("Failed to save URL"));
-            setFlash(ctx, "success", "Страница успешно добавлена");
-            ctx.redirect(urlPath(savedUrl.id()));
+            parsedUrl = new URI(rawUrl);
         } catch (URISyntaxException e) {
             renderInvalidUrl(ctx, rawUrl);
+            return;
         }
+
+        String normalizedUrl = UrlNormalizer.normalize(parsedUrl).orElse(null);
+        if (normalizedUrl == null) {
+            renderInvalidUrl(ctx, rawUrl);
+            return;
+        }
+
+        Url existingUrl = urlRepository.findByName(normalizedUrl).orElse(null);
+        if (existingUrl != null) {
+            setFlash(ctx, "info", "Страница уже существует");
+            ctx.redirect(urlPath(existingUrl.id()));
+            return;
+        }
+
+        Url savedUrl = urlRepository.save(new Url(normalizedUrl, Instant.now()))
+            .orElseThrow(() -> new DatabaseException("Failed to save URL"));
+        setFlash(ctx, "success", "Страница успешно добавлена");
+        ctx.redirect(urlPath(savedUrl.id()));
     }
 
-    public void showUrlsPage(Context ctx) throws SQLException {
+    public void showUrlsPage(Context ctx) {
         List<Url> urls = urlRepository.findAll();
         Map<Long, UrlCheck> latestChecks = urlCheckRepository.findLatestChecks();
         Map<String, Object> model = baseTemplateData(ctx, null, null);
@@ -75,7 +78,7 @@ public final class UrlController {
         ctx.render("urls/index.jte", model);
     }
 
-    public void showUrlPage(Context ctx) throws SQLException {
+    public void showUrlPage(Context ctx) {
         Optional<Url> maybeUrl = findRequestedUrl(ctx);
         if (maybeUrl.isEmpty()) {
             return;
@@ -88,7 +91,7 @@ public final class UrlController {
         ctx.render("urls/show.jte", model);
     }
 
-    public void createCheck(Context ctx) throws SQLException {
+    public void createCheck(Context ctx) {
         Optional<Url> maybeUrl = findRequestedUrl(ctx);
         if (maybeUrl.isEmpty()) {
             return;
@@ -100,7 +103,7 @@ public final class UrlController {
             if (urlCheck.statusCode() >= 400) {
                 setFlash(ctx, "danger", "Произошла ошибка при проверке");
             } else {
-                urlCheckRepository.save(urlCheck).orElseThrow(() -> new SQLException("Failed to save URL check"));
+                urlCheckRepository.save(urlCheck).orElseThrow(() -> new DatabaseException("Failed to save URL check"));
                 setFlash(ctx, "success", "Страница успешно проверена");
             }
         } catch (RuntimeException e) {
@@ -141,7 +144,7 @@ public final class UrlController {
         return new FlashMessage(flashType, flashMessage);
     }
 
-    private Optional<Url> findRequestedUrl(Context ctx) throws SQLException {
+    private Optional<Url> findRequestedUrl(Context ctx) {
         Optional<Long> maybeUrlId = parseUrlId(ctx);
         if (maybeUrlId.isEmpty()) {
             renderNotFound(ctx);

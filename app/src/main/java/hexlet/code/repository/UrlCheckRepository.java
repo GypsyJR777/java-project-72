@@ -1,6 +1,8 @@
 package hexlet.code.repository;
 
+import hexlet.code.exception.DatabaseException;
 import hexlet.code.model.UrlCheck;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -19,12 +21,11 @@ public final class UrlCheckRepository extends BaseRepository {
         super(dataSource);
     }
 
-    public Optional<UrlCheck> save(UrlCheck urlCheck) throws SQLException {
+    public Optional<UrlCheck> save(UrlCheck urlCheck) throws DatabaseException {
         String sql = """
             INSERT INTO url_checks (url_id, status_code, h1, title, description, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """;
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
@@ -50,24 +51,26 @@ public final class UrlCheckRepository extends BaseRepository {
                     ));
                 }
             }
-        }
 
-        return Optional.empty();
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to save URL check", e);
+        }
     }
 
-    public List<UrlCheck> findByUrlId(long urlId) throws SQLException {
+    public List<UrlCheck> findByUrlId(long urlId) throws DatabaseException {
         String sql = """
             SELECT id, url_id, status_code, h1, title, description, created_at
             FROM url_checks
             WHERE url_id = ?
             ORDER BY created_at DESC, id DESC
             """;
-        List<UrlCheck> checks = new ArrayList<>();
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql)
         ) {
+            List<UrlCheck> checks = new ArrayList<>();
+
             statement.setLong(1, urlId);
 
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -75,31 +78,35 @@ public final class UrlCheckRepository extends BaseRepository {
                     checks.add(buildUrlCheck(resultSet));
                 }
             }
-        }
 
-        return checks;
+            return checks;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to load URL checks", e);
+        }
     }
 
-    public Map<Long, UrlCheck> findLatestChecks() throws SQLException {
+    public Map<Long, UrlCheck> findLatestChecks() throws DatabaseException {
         String sql = """
             SELECT id, url_id, status_code, h1, title, description, created_at
             FROM url_checks
             ORDER BY url_id ASC, created_at DESC, id DESC
             """;
-        Map<Long, UrlCheck> latestChecks = new HashMap<>();
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql);
             ResultSet resultSet = statement.executeQuery()
         ) {
+            Map<Long, UrlCheck> latestChecks = new HashMap<>();
+
             while (resultSet.next()) {
                 UrlCheck urlCheck = buildUrlCheck(resultSet);
                 latestChecks.putIfAbsent(urlCheck.urlId(), urlCheck);
             }
-        }
 
-        return latestChecks;
+            return latestChecks;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to load latest URL checks", e);
+        }
     }
 
     private UrlCheck buildUrlCheck(ResultSet resultSet) throws SQLException {

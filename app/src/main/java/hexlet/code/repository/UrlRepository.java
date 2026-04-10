@@ -1,6 +1,8 @@
 package hexlet.code.repository;
 
+import hexlet.code.exception.DatabaseException;
 import hexlet.code.model.Url;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -17,9 +19,8 @@ public final class UrlRepository extends BaseRepository {
         super(dataSource);
     }
 
-    public Optional<Url> find(long id) throws SQLException {
+    public Optional<Url> find(long id) throws DatabaseException {
         String sql = "SELECT id, name, created_at FROM urls WHERE id = ?";
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql)
@@ -31,14 +32,15 @@ public final class UrlRepository extends BaseRepository {
                     return Optional.of(buildUrl(resultSet));
                 }
             }
-        }
 
-        return Optional.empty();
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to find URL by id", e);
+        }
     }
 
-    public Optional<Url> findByName(String name) throws SQLException {
+    public Optional<Url> findByName(String name) throws DatabaseException {
         String sql = "SELECT id, name, created_at FROM urls WHERE name = ?";
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql)
@@ -50,31 +52,34 @@ public final class UrlRepository extends BaseRepository {
                     return Optional.of(buildUrl(resultSet));
                 }
             }
-        }
 
-        return Optional.empty();
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to find URL by name", e);
+        }
     }
 
-    public List<Url> findAll() throws SQLException {
+    public List<Url> findAll() throws DatabaseException {
         String sql = "SELECT id, name, created_at FROM urls ORDER BY created_at DESC, id DESC";
-        List<Url> urls = new ArrayList<>();
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql);
             ResultSet resultSet = statement.executeQuery()
         ) {
+            List<Url> urls = new ArrayList<>();
+
             while (resultSet.next()) {
                 urls.add(buildUrl(resultSet));
             }
-        }
 
-        return urls;
+            return urls;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to load URLs", e);
+        }
     }
 
-    public Optional<Url> save(Url url) throws SQLException {
+    public Optional<Url> save(Url url) throws DatabaseException {
         String sql = "INSERT INTO urls (name, created_at) VALUES (?, ?)";
-
         try (
             Connection connection = getConnection();
             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
@@ -88,9 +93,11 @@ public final class UrlRepository extends BaseRepository {
                     return Optional.of(new Url(generatedKeys.getLong(1), url.name(), url.createdAt()));
                 }
             }
-        }
 
-        return Optional.empty();
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to save URL", e);
+        }
     }
 
     private Url buildUrl(ResultSet resultSet) throws SQLException {

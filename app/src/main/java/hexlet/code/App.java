@@ -7,10 +7,12 @@ import gg.jte.resolve.ResourceCodeResolver;
 import hexlet.code.controller.UrlController;
 import hexlet.code.database.DatabaseConfig;
 import hexlet.code.database.DatabaseInitializer;
+import hexlet.code.exception.DatabaseException;
 import hexlet.code.repository.UrlCheckRepository;
 import hexlet.code.repository.UrlRepository;
 import hexlet.code.service.UrlCheckService;
 import io.javalin.Javalin;
+import io.javalin.http.HttpStatus;
 import io.javalin.rendering.template.JavalinJte;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -38,6 +40,11 @@ public final class App {
         });
 
         app.events(events -> events.serverStopped(dataSource::close));
+        app.exception(DatabaseException.class, (e, ctx) -> {
+            log.error("Database request processing failed", e);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR);
+            ctx.result("Internal server error");
+        });
         app.get("/", urlController::showHomePage);
         app.post("/urls", urlController::createUrl);
         app.get("/urls", urlController::showUrlsPage);
